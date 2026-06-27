@@ -572,7 +572,6 @@ def _infer_tool_parser(chat_template):
     elif "<tool_call>" in chat_template and (
         "tool_call.name" in chat_template
         or "tool_call.function.name" in chat_template
-        or "tool_call.function" in chat_template
     ):
         return "json_tools"
     return None
