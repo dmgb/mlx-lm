@@ -1,6 +1,7 @@
 import base64
 import hashlib
 import json
+import logging
 import socket
 import struct
 import time
@@ -220,6 +221,20 @@ def chat_tools(tools, tool_choice=None):
                     },
                 }
             )
+        elif tool.get("type") == "namespace" and tool.get("tools"):
+            # Flatten namespace tools (e.g. Codex multi_agent_v1) into individual functions
+            for subtool in tool["tools"]:
+                if subtool.get("type") == "function":
+                    chat_tools.append(
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": f"{tool['name']}.{subtool['name']}",
+                                "description": subtool.get("description", ""),
+                                "parameters": subtool.get("parameters") or {},
+                            },
+                        }
+                    )
     return chat_tools or None
 
 
@@ -446,8 +461,39 @@ def prepare_request(handler, completion_request_cls, ws_cache=None):
         )
         input_items = combined_items
 
+    # Merge all system messages to the front — some models (e.g. Qwen3.5) require
+    # system messages to appear only at position 0. Multi-turn Codex requests
+    # resend developer instructions each turn, producing system messages mid-history.
+    sys_messages = [m for m in messages if m.get("role") == "system"]
+    non_sys_messages = [m for m in messages if m.get("role") != "system"]
+    if len(sys_messages) > 1:
+        merged = "\n\n".join(m["content"] for m in sys_messages if m.get("content"))
+        messages = [{"role": "system", "content": merged}] + non_sys_messages
+    elif sys_messages:
+        messages = sys_messages + non_sys_messages
+
     validate_tool_choice(body.get("tools"), body.get("tool_choice"))
     tools = chat_tools(body.get("tools"), body.get("tool_choice"))
+
+    raw_tools = body.get("tools") or []
+    if any(
+        isinstance(t, dict) and t.get("name") == "exec_command" for t in raw_tools
+    ):
+        enforcement = (
+            "You are an agent with shell access. "
+            "You MUST call the exec_command tool to perform any file or shell operation. "
+            "Never write file contents in markdown or describe what you would do — "
+            "always call exec_command with the appropriate shell command. "
+            "Do not include the sandbox_permissions argument when calling exec_command."
+        )
+        if messages and messages[0].get("role") == "system":
+            messages[0] = dict(
+                messages[0],
+                content=enforcement + "\n\n" + messages[0]["content"],
+            )
+        else:
+            messages.insert(0, {"role": "system", "content": enforcement})
+
     return (
         completion_request_cls("chat", "", messages, tools, body.get("role_mapping")),
         input_items,
