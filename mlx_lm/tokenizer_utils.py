@@ -1,5 +1,6 @@
 import importlib
 import json
+import logging
 import warnings
 from functools import partial
 from json import JSONDecodeError
@@ -568,7 +569,11 @@ def _infer_tool_parser(chat_template):
         return "kimi_k2"
     elif "[TOOL_CALLS]" in chat_template:
         return "mistral"
-    elif "<tool_call>" in chat_template and "tool_call.name" in chat_template:
+    elif "<tool_call>" in chat_template and (
+        "tool_call.name" in chat_template
+        or "tool_call.function.name" in chat_template
+        or "tool_call.function" in chat_template
+    ):
         return "json_tools"
     return None
 
@@ -630,10 +635,12 @@ def load(
         tool_call_start = tool_module.tool_call_start
         tool_call_end = tool_module.tool_call_end
         tokenizer_config["tool_parser_type"] = tool_parser_type
+        logging.info(f"Tool parser: {tool_parser_type}")
     else:
         tool_parser = None
         tool_call_start = None
         tool_call_end = None
+        logging.warning("No tool parser detected — tool calls will not be parsed from model output")
 
     return TokenizerWrapper(
         tokenizer,

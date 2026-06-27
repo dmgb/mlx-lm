@@ -587,14 +587,29 @@ def run_response(handler, deps, send_event=None, ws_cache=None):
                 break
             item = tool_call_item(tool_call)
             output.append(item)
+            output_index = len(output) - 1
             emit(
                 "response.output_item.added",
-                output_index=len(output) - 1,
+                output_index=output_index,
                 item=dict(item, status="in_progress"),
             )
             emit(
+                "response.function_call_arguments.delta",
+                item_id=item["id"],
+                output_index=output_index,
+                call_id=item["call_id"],
+                delta=item["arguments"],
+            )
+            emit(
+                "response.function_call_arguments.done",
+                item_id=item["id"],
+                output_index=output_index,
+                call_id=item["call_id"],
+                arguments=item["arguments"],
+            )
+            emit(
                 "response.output_item.done",
-                output_index=len(output) - 1,
+                output_index=output_index,
                 item=item,
             )
 
