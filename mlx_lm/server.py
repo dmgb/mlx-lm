@@ -395,6 +395,14 @@ class ModelProvider:
 
     def load(self, model_path, adapter_path=None, draft_model_path=None):
         model_path = self._model_map.get(model_path, model_path)
+        # If the requested model isn't a known key and isn't a local directory,
+        # fall back to the default model (handles Codex CLI sending its own model name).
+        if (
+            model_path not in self._model_map
+            and not Path(model_path).is_dir()
+            and self.cli_args.model
+        ):
+            model_path = self._model_map.get("default_model", model_path)
         adapter_path = self._adapter_map.get(model_path, adapter_path)
         draft_model_path = self._draft_model_map.get(draft_model_path, draft_model_path)
 
@@ -1132,6 +1140,9 @@ class APIHandler(BaseHTTPRequestHandler):
             "/v1/responses/compact": self.handle_open_responses_compact,
         }
 
+        # Strip query string before routing (e.g. Codex CLI appends ?... to paths).
+        self.path = self.path.split("?")[0]
+
         if self.path not in request_factories:
             self._set_completion_headers(404)
             self.end_headers()
@@ -1617,6 +1628,13 @@ class APIHandler(BaseHTTPRequestHandler):
             and self.headers.get("Upgrade", "").lower() == "websocket"
         ):
             self.handle_open_responses_websocket()
+        elif self.path.startswith("/v1/responses"):
+            # Codex CLI polls GET /v1/responses before POSTing; return empty list.
+            self._set_completion_headers(200)
+            self.end_headers()
+            self.wfile.write(
+                json.dumps({"object": "list", "data": [], "has_more": False}).encode()
+            )
         elif self.path.startswith("/v1/models"):
             self.handle_models_request()
         elif self.path == "/health":
